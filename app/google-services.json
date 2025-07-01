@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "659061738898",
+    "project_id": "estimator-23df3",
+    "storage_bucket": "estimator-23df3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:659061738898:android:84a7b9a1155b41bcc3054b",
+        "android_client_info": {
+          "package_name": "com.madtitan.estimator"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "659061738898-qor7vrqhm4qnq141pnhsg1jib2ptecpj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.madtitan.estimator",
+            "certificate_hash": "63d525731acac06cdc182faad18106c659c2c5bc"
+          }
+        },
+        {
+          "client_id": "659061738898-rpl0vpb5k5d5462ak1sksep5d1puo6nv.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBs-KEtthnFRNfm3MZtoCn8sxH9IAz27Ig"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "659061738898-rpl0vpb5k5d5462ak1sksep5d1puo6nv.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
