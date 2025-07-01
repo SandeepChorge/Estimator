@@ -1,0 +1,9 @@
+/build
+/local.properties
+/.idea/
+/.idea/misc.xml
+/.gradle
+build
+.idea/**/gradle.xml
+.idea/**/libraries
+.kotlin
