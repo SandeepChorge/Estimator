@@ -3,7 +3,7 @@ package com.madtitan.estimator
 import android.app.DatePickerDialog
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
-import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,20 +20,24 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.filled.List
+import androidx.compose.material.icons.outlined.List
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Divider
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -58,6 +62,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -70,10 +75,15 @@ import androidx.navigation.compose.composable
 import androidx.navigation.navArgument
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
+import com.madtitan.estimator.core.domain.Category
+import com.madtitan.estimator.core.domain.CategoryWithSubCategories
 import com.madtitan.estimator.core.domain.Payment
+import com.madtitan.estimator.core.domain.SubCategory
 import com.madtitan.estimator.feature_auth.ui.LoginScreen
 import com.madtitan.estimator.feature_auth.viewmodel.AllTransactionsViewModel
 import com.madtitan.estimator.feature_auth.viewmodel.BudgetViewModel
+import com.madtitan.estimator.feature_auth.viewmodel.CategoryViewModel
 import com.madtitan.estimator.feature_auth.viewmodel.PaymentViewModel
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
@@ -91,6 +101,7 @@ sealed class Screen(val route: String)  {
     data object Dashboard : Screen("dashboard")
     data object AddExpense : Screen("add_expense")
     data object AllTransactions : Screen("all_transactions")
+    data object CategoryManagement : Screen("category_management")
 
     data object PaymentDetail : Screen("payment_detail/{paymentId}") {
         fun createRoute(paymentId: String): String = "payment_detail/$paymentId"
@@ -100,7 +111,12 @@ sealed class Screen(val route: String)  {
 data class FilterState(
     val modes: Set<String> = emptySet(),
     val startDate: Timestamp? = null,
-    val endDate: Timestamp? = null
+    val endDate: Timestamp? = null,
+    val transactionType: String? = null,  // expense/income/borrow/lent
+    val tag: String? = null,
+    val linkedToTag: String? = null,
+    val categoryId: String? = null,
+    val subCategoryId: String? = null
 )
 
 @Composable
@@ -121,6 +137,9 @@ fun AppNavHost(navController: NavHostController, modifier: Modifier = Modifier) 
         composable(Screen.AllTransactions.route) {
             AllTransactionsScreen(navController)
         }
+        composable(Screen.CategoryManagement.route) {
+            CategoryManagementScreen(navController)
+        }
         composable(
             route = Screen.PaymentDetail.createRoute("{paymentId}"),
             arguments = listOf(navArgument("paymentId") { type = NavType.StringType })
@@ -138,6 +157,7 @@ fun SplashRouter(navController: NavHostController) {
     LaunchedEffect(Unit) {
         val currentUser = FirebaseAuth.getInstance().currentUser
         if (currentUser != null) {
+            initializeTagCountersIfNeeded()
             // User is signed in, go to dashboard
             navController.navigate(Screen.Dashboard.route) {
                 popUpTo(Screen.Splash.route) { inclusive = true }
@@ -184,6 +204,18 @@ fun DashboardScreen(navController: NavHostController,
 
         Spacer(modifier = Modifier.height(24.dp))
 
+        Button(
+            onClick = {
+                navController.navigate(Screen.CategoryManagement.route)
+            }
+        ) {
+            Icon(Icons.Outlined.List, contentDescription = "Manage Categories")
+            Spacer(Modifier.width(8.dp))
+            Text("Manage Categories")
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         RecentTransactionsSection(
             recentTransactions = recentTransactions,
             onPaymentClick = { paymentId ->
@@ -199,11 +231,30 @@ fun DashboardScreen(navController: NavHostController,
 
 
 @Composable
-fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewModel = hiltViewModel()) {
+fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewModel = hiltViewModel(),
+                     categoryViewModel: CategoryViewModel = hiltViewModel()) {
     var amount by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     var paymentMode by remember { mutableStateOf("Cash") }
     val paymentModes = listOf("Cash", "Online", "Card")
+    // ✅ Load category list once
+    val categories = categoryViewModel.categoryList
+    var subcategories by remember { mutableStateOf<List<SubCategory>>(emptyList()) }
+    var selectedCategory by remember { mutableStateOf<Category?>(null) }
+    var selectedSubCategory by remember { mutableStateOf<SubCategory?>(null) }
+    // For dialog state
+    var showAddCategoryDialog by remember { mutableStateOf(false) }
+    var showAddSubCategoryDialog by remember { mutableStateOf(false) }
+    /*
+    //category name display
+    val categoryName = categoryViewModel.categoryList
+        .firstOrNull { it.category.id == payment.categoryId }
+        ?.category?.name.orEmpty()
+
+    val subCategoryName = categoryViewModel.categoryList
+        .firstOrNull { it.category.id == payment.categoryId }
+        ?.subCategories?.firstOrNull { it.id == payment.subCategoryId }
+        ?.name.orEmpty()*/
 
     val context = LocalContext.current
     val calendar = remember { Calendar.getInstance() }
@@ -216,6 +267,15 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
     val displayFormatter = remember {
         SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
     }
+    LaunchedEffect(selectedCategory) {
+        subcategories = selectedCategory?.let {
+            categoryViewModel.categoryList
+                .firstOrNull { it.category.id == selectedCategory!!.id }
+                ?.subCategories ?: emptyList()
+        } ?: emptyList()
+        selectedSubCategory = null // Reset subcategory when category changes
+    }
+
     Column(modifier = Modifier
         .fillMaxSize()
         .padding(16.dp)) {
@@ -270,6 +330,24 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        CategoryDropdown(
+            categories = categories.map { it.category },
+            selectedCategory = selectedCategory,
+            onCategorySelected = { selectedCategory = it },
+            onAddNewCategory = { showAddCategoryDialog = true }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (selectedCategory != null) {
+            SubCategoryDropdown(
+                subcategories = subcategories,
+                selectedSubCategory = selectedSubCategory,
+                onSubCategorySelected = { selectedSubCategory = it },
+                onAddNewSubCategory = { showAddSubCategoryDialog = true }
+            )
+        }
+
         // DateTime display & picker launcher
         Button(
             onClick = { showDatePicker = true },
@@ -290,7 +368,9 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
                     paymentMode = paymentMode,
                     payeeId = "", // you can associate later
                     accountId = userId ,     // if you track events
-                    timestamp = chosenTimestamp
+                    timestamp = chosenTimestamp,
+                    category = selectedCategory?.id ?: "",
+                    subCategory = selectedSubCategory?.id ?: ""
                 )
                 viewModel.addPayment(payment) {
                     navController.popBackStack() // navigate back
@@ -334,6 +414,29 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
                 false
             ).show()
         }
+
+        if (showAddCategoryDialog) {
+            SimpleInputDialog(
+                title = "Add Category",
+                onDismiss = { showAddCategoryDialog = false },
+                onConfirm = { name ->
+                    categoryViewModel.addCategory(name)
+                    showAddCategoryDialog = false
+                }
+            )
+        }
+
+        if (showAddSubCategoryDialog && selectedCategory != null) {
+            SimpleInputDialog(
+                title = "Add Subcategory",
+                onDismiss = { showAddSubCategoryDialog = false },
+                onConfirm = { name ->
+                    categoryViewModel.addSubCategory(name, selectedCategory!!.id)
+                    showAddSubCategoryDialog = false
+                }
+            )
+        }
+
     }
 }
 
@@ -400,7 +503,18 @@ fun AllTransactionsScreen(navController: NavController) {
 @Composable
 fun PaymentDetailScreen(paymentId: String) {
     val viewModel: PaymentViewModel = hiltViewModel()
+    val categoryViewModel: CategoryViewModel = hiltViewModel()
     val payment by viewModel.getPaymentById(paymentId).collectAsState(initial = null)
+    /*
+    //category name display
+    val categoryName = categoryViewModel.categoryList
+        .firstOrNull { it.category.id == payment.categoryId }
+        ?.category?.name.orEmpty()
+
+    val subCategoryName = categoryViewModel.categoryList
+        .firstOrNull { it.category.id == payment.categoryId }
+        ?.subCategories?.firstOrNull { it.id == payment.subCategoryId }
+        ?.name.orEmpty()*/
 
     payment?.let {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -408,6 +522,13 @@ fun PaymentDetailScreen(paymentId: String) {
             Text("Amount: ₹${it.amount}")
             Text("Notes: ${it.notes}")
             Text("Timestamp: ${it.timestamp.toDate()}")
+            Text("Category: ${categoryViewModel.categoryList
+                .firstOrNull { cat-> cat.category.id == it.category }
+                ?.category?.name.orEmpty()}")
+            Text("Sub Category: ${categoryViewModel.categoryList
+                .firstOrNull { cat-> cat.category.id == it.category }
+                ?.subCategories?.firstOrNull { subCat -> subCat.id == it.subCategory }
+                ?.name.orEmpty()}")
         }
     } ?: run {
         Text("Loading payment...")
@@ -764,3 +885,396 @@ fun FilterContent(
         ).show()
     }
 }
+
+fun initializeTagCountersIfNeeded() {
+    val firestore = FirebaseFirestore.getInstance()
+    val tagCounterDoc = firestore.collection("metadata").document("tag_counters")
+
+    tagCounterDoc.get().addOnSuccessListener { doc ->
+        if (!doc.exists()) {
+            tagCounterDoc.set(
+                mapOf(
+                    "incomeCounter" to 0,
+                    "expenseCounter" to 0,
+                    "borrowCounter" to 0,
+                    "lentCounter" to 0
+                )
+            )
+        }
+    }
+}
+
+
+@Composable
+fun CategoryManagementScreen(navController: NavHostController,viewModel: CategoryViewModel = hiltViewModel()) {
+    val categories = viewModel.categoryList
+    val expandedIds = viewModel.expandedIds.value
+
+    // Dialog state
+    var showCategoryDialog by remember { mutableStateOf(false) }
+    var categoryToEdit by remember { mutableStateOf<Category?>(null) }
+
+    var showSubCategoryDialog by remember { mutableStateOf(false) }
+    var subCategoryToEdit by remember { mutableStateOf<SubCategory?>(null) }
+    var subCategoryParent: Category? by remember { mutableStateOf(null) }
+
+    Scaffold(
+        floatingActionButton = {
+            FloatingActionButton(onClick = {
+                categoryToEdit = null
+                showCategoryDialog = true
+            }) {
+                Icon(Icons.Default.Add, contentDescription = "Add Category")
+            }
+        }
+    ) { padding ->
+        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+            Text("Manage Categories", style = MaterialTheme.typography.titleLarge)
+
+            Spacer(Modifier.height(16.dp))
+
+            LazyColumn {
+                items(categories) { item ->
+                    CategoryItem(
+                        item = item,
+                        isExpanded = expandedIds.contains(item.category.id),
+                        onToggleExpand = { viewModel.toggleExpanded(item.category.id) },
+                        onEdit = {
+                            categoryToEdit = item.category
+                            showCategoryDialog = true
+                        },
+                        onDelete = { viewModel.deleteCategory( it ) },
+                        onAddSubCategory = {
+                            subCategoryParent = it
+                            subCategoryToEdit = null
+                            showSubCategoryDialog = true
+                        },
+                        onEditSubCategory = {
+                            subCategoryToEdit = it
+                            subCategoryParent = null
+                            showSubCategoryDialog = true
+                        },
+                        onDeleteSubCategory = { viewModel.deleteSubCategory(it) }
+                    )
+                }
+            }
+        }
+    }
+
+    if (showCategoryDialog) {
+        CategoryDialog(
+            initialName = categoryToEdit?.name.orEmpty(),
+            title = if (categoryToEdit == null) "Add Category" else "Edit Category",
+            onDismiss = { showCategoryDialog = false },
+            onConfirm = { name ->
+                if (categoryToEdit == null) {
+                    viewModel.addCategory(name)
+                } else {
+                    viewModel.updateCategory(categoryToEdit!!.copy(name = name))
+                }
+                showCategoryDialog = false
+            }
+        )
+    }
+
+    if (showSubCategoryDialog) {
+        SubCategoryDialog(
+            initialName = subCategoryToEdit?.name.orEmpty(),
+            title = if (subCategoryToEdit == null) "Add Subcategory" else "Edit Subcategory",
+            onDismiss = { showSubCategoryDialog = false },
+            onConfirm = { name ->
+                if (subCategoryToEdit == null) {
+                    viewModel.addSubCategory(name, subCategoryParent?.id ?: "")
+                } else {
+                    viewModel.updateSubCategory(subCategoryToEdit!!.copy(name = name))
+                }
+                showSubCategoryDialog = false
+            }
+        )
+    }
+}
+
+
+@Composable
+fun CategoryDialog(
+    initialName: String,
+    title: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var name by remember { mutableStateOf(initialName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(onClick = { if (name.isNotBlank()) onConfirm(name.trim()) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Category Name") },
+                singleLine = true
+            )
+        }
+    )
+}
+
+@Composable
+fun SubCategoryDialog(
+    initialName: String,
+    title: String,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var name by remember { mutableStateOf(initialName) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        confirmButton = {
+            Button(onClick = { if (name.isNotBlank()) onConfirm(name.trim()) }) {
+                Text("Save")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) { Text("Cancel") }
+        },
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = name,
+                onValueChange = { name = it },
+                label = { Text("Subcategory Name") },
+                singleLine = true
+            )
+        }
+    )
+}
+
+@Composable
+fun CategoryItem(
+    item: CategoryWithSubCategories,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: (Category) -> Unit, // ✅ accepts category
+    onAddSubCategory: (Category) -> Unit, // ✅ accepts category
+    onEditSubCategory: (SubCategory) -> Unit,
+    onDeleteSubCategory: (SubCategory) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp)
+            .border(1.dp, Color.LightGray, RoundedCornerShape(8.dp))
+            .padding(12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(
+                text = item.category.name,
+                style = MaterialTheme.typography.titleMedium,
+                modifier = Modifier.weight(1f)
+            )
+
+            IconButton(onClick = onToggleExpand) {
+                Icon(
+                    imageVector = if (isExpanded) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
+                    contentDescription = if (isExpanded) "Collapse" else "Expand"
+                )
+            }
+
+            IconButton(onClick = onEdit) {
+                Icon(Icons.Default.Edit, contentDescription = "Edit Category")
+            }
+
+            IconButton(onClick = { onDelete(item.category) }) { // ✅ use item
+                Icon(Icons.Default.Delete, contentDescription = "Delete Category")
+            }
+        }
+
+        if (isExpanded) {
+            Spacer(Modifier.height(8.dp))
+            item.subCategories.forEach { sub ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 16.dp, top = 4.dp, bottom = 4.dp)
+                ) {
+                    Text(
+                        text = sub.name,
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    IconButton(onClick = { onEditSubCategory(sub) }) {
+                        Icon(Icons.Default.Edit, contentDescription = "Edit Subcategory")
+                    }
+                    IconButton(onClick = { onDeleteSubCategory(sub) }) {
+                        Icon(Icons.Default.Delete, contentDescription = "Delete Subcategory")
+                    }
+                }
+            }
+
+            OutlinedButton(
+                onClick = { onAddSubCategory(item.category) }, // ✅ use item
+                modifier = Modifier.padding(top = 8.dp, start = 8.dp)
+            ) {
+                Icon(Icons.Default.Add, contentDescription = null)
+                Spacer(Modifier.width(4.dp))
+                Text("Add Subcategory")
+            }
+        }
+    }
+}
+
+@Composable
+fun SimpleInputDialog(
+    title: String,
+    initialText: String = "",
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var text by remember { mutableStateOf(initialText) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                label = { Text("Name") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    if (text.isNotBlank()) onConfirm(text.trim())
+                }
+            ) {
+                Text("Confirm")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun CategoryDropdown(
+    categories: List<Category>,
+    selectedCategory: Category?,
+    onCategorySelected: (Category?) -> Unit,
+    onAddNewCategory: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = selectedCategory?.name ?: "",
+            onValueChange = {},
+            label = { Text("Category") },
+            readOnly = true,
+            trailingIcon = {
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            categories.forEach { category ->
+                DropdownMenuItem(
+                    text = { Text(category.name) },
+                    onClick = {
+                        onCategorySelected(category)
+                        expanded = false
+                    }
+                )
+            }
+
+            HorizontalDivider()
+
+            DropdownMenuItem(
+                text = { Text("+ Add New Category") },
+                onClick = {
+                    onAddNewCategory()
+                    expanded = false
+                }
+            )
+        }
+    }
+}
+
+@Composable
+fun SubCategoryDropdown(
+    subcategories: List<SubCategory>,
+    selectedSubCategory: SubCategory?,
+    onSubCategorySelected: (SubCategory?) -> Unit,
+    onAddNewSubCategory: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = selectedSubCategory?.name ?: "",
+            onValueChange = {},
+            label = { Text("Subcategory") },
+            readOnly = true,
+            trailingIcon = {
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            subcategories.forEach { sub ->
+                DropdownMenuItem(
+                    text = { Text(sub.name) },
+                    onClick = {
+                        onSubCategorySelected(sub)
+                        expanded = false
+                    }
+                )
+            }
+
+            HorizontalDivider()
+
+            DropdownMenuItem(
+                text = { Text("+ Add New Subcategory") },
+                onClick = {
+                    onAddNewSubCategory()
+                    expanded = false
+                }
+            )
+        }
+    }
+}
+
+
+

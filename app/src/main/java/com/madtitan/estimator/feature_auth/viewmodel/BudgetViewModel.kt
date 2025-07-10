@@ -1,5 +1,6 @@
 package com.madtitan.estimator.feature_auth.viewmodel
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
@@ -22,6 +23,9 @@ class BudgetViewModel @Inject constructor(
             .document(payment.id)
             .set(payment.copy(accountId = userId)) // temporarily using eventId to track owner
             .addOnSuccessListener { onComplete() }
+            .addOnFailureListener { e -> e.printStackTrace()
+                Log.e("BudgetVM", "Failed to save")
+            }
     }
 
     fun fetchRecentPayments(limit: Long = 5): Flow<List<Payment>> = callbackFlow {
