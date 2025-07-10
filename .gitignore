@@ -20,3 +20,6 @@ local.properties
 .idea/misc.xml
 .idea/appInsightsSettings.xml
 .idea/
+
+
+/.DS_Store
