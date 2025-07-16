@@ -235,8 +235,8 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
                      categoryViewModel: CategoryViewModel = hiltViewModel()) {
     var amount by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
-    var paymentMode by remember { mutableStateOf("Cash") }
-    val paymentModes = listOf("Cash", "Online", "Card")
+    var paymentMode by remember { mutableStateOf("Online") }
+    val paymentModes = listOf("Online", "Cash", "Card")
     // ✅ Load category list once
     val categories = categoryViewModel.categoryList
     var subcategories by remember { mutableStateOf<List<SubCategory>>(emptyList()) }
@@ -245,16 +245,10 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
     // For dialog state
     var showAddCategoryDialog by remember { mutableStateOf(false) }
     var showAddSubCategoryDialog by remember { mutableStateOf(false) }
-    /*
-    //category name display
-    val categoryName = categoryViewModel.categoryList
-        .firstOrNull { it.category.id == payment.categoryId }
-        ?.category?.name.orEmpty()
 
-    val subCategoryName = categoryViewModel.categoryList
-        .firstOrNull { it.category.id == payment.categoryId }
-        ?.subCategories?.firstOrNull { it.id == payment.subCategoryId }
-        ?.name.orEmpty()*/
+    val types = listOf("income", "expense", "borrow", "lent")
+    var type by remember { mutableStateOf("expense") }
+    var counterpartyName by remember { mutableStateOf("") }
 
     val context = LocalContext.current
     val calendar = remember { Calendar.getInstance() }
@@ -330,6 +324,26 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        TypeDropdown(
+            types = types,
+            selectedType = type,
+            onTypeSelected = { type = it }
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        if (type == "borrow" || type == "lent") {
+            OutlinedTextField(
+                value = counterpartyName,
+                onValueChange = { counterpartyName = it },
+                label = { Text("Person Name") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+
         CategoryDropdown(
             categories = categories.map { it.category },
             selectedCategory = selectedCategory,
@@ -370,7 +384,9 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
                     accountId = userId ,     // if you track events
                     timestamp = chosenTimestamp,
                     category = selectedCategory?.id ?: "",
-                    subCategory = selectedSubCategory?.id ?: ""
+                    subCategory = selectedSubCategory?.id ?: "",
+                    type = type,
+                    counterpartyName = if (type == "borrow" || type == "lent") counterpartyName else ""
                 )
                 viewModel.addPayment(payment) {
                     navController.popBackStack() // navigate back
@@ -518,6 +534,7 @@ fun PaymentDetailScreen(paymentId: String) {
 
     payment?.let {
         Column(modifier = Modifier.padding(16.dp)) {
+            Text("Type: ${it.type.replaceFirstChar { char -> char.uppercaseChar() }}")
             Text("Payment Mode: ${it.paymentMode}")
             Text("Amount: ₹${it.amount}")
             Text("Notes: ${it.notes}")
@@ -529,6 +546,12 @@ fun PaymentDetailScreen(paymentId: String) {
                 .firstOrNull { cat-> cat.category.id == it.category }
                 ?.subCategories?.firstOrNull { subCat -> subCat.id == it.subCategory }
                 ?.name.orEmpty()}")
+
+            if (it.type == "borrow" || it.type == "lent") {
+                Text("Person: ${it.counterpartyName}")
+            }
+
+
         }
     } ?: run {
         Text("Loading payment...")
@@ -565,6 +588,19 @@ fun PaymentListItem(
                     color = MaterialTheme.colorScheme.primary
                 )
             }
+            // 👇 Insert this line
+            Text(
+                text = buildString {
+                    append(payment.type.uppercase())
+                    if (payment.type == "borrow" || payment.type == "lent") {
+                        append(" • ${payment.counterpartyName}")
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.padding(top = 4.dp)
+            )
+
             if (payment.notes.isNotBlank()) {
                 Text(
                     text = payment.notes,
@@ -1275,6 +1311,49 @@ fun SubCategoryDropdown(
         }
     }
 }
+
+
+@Composable
+fun TypeDropdown(
+    types: List<String>,
+    selectedType: String,
+    onTypeSelected: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = selectedType,
+            onValueChange = {},
+            label = { Text("Transaction Type") },
+            readOnly = true,
+            trailingIcon = {
+                IconButton(onClick = { expanded = !expanded }) {
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            types.forEach { type ->
+                DropdownMenuItem(
+                    text = { Text(type.replaceFirstChar { it.uppercaseChar() }) },
+                    onClick = {
+                        onTypeSelected(type)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+
 
 
 
