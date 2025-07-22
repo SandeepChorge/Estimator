@@ -232,7 +232,8 @@ fun DashboardScreen(navController: NavHostController,
 
 @Composable
 fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewModel = hiltViewModel(),
-                     categoryViewModel: CategoryViewModel = hiltViewModel()) {
+                     categoryViewModel: CategoryViewModel = hiltViewModel(),
+                     paymentViewModel: PaymentViewModel = hiltViewModel()) {
     var amount by remember { mutableStateOf("") }
     var notes by remember { mutableStateOf("") }
     var paymentMode by remember { mutableStateOf("Online") }
@@ -261,6 +262,9 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
     val displayFormatter = remember {
         SimpleDateFormat("dd MMM yyyy, hh:mm a", Locale.getDefault())
     }
+
+    var generatedTag by remember { mutableStateOf("") }
+
     LaunchedEffect(selectedCategory) {
         subcategories = selectedCategory?.let {
             categoryViewModel.categoryList
@@ -268,6 +272,12 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
                 ?.subCategories ?: emptyList()
         } ?: emptyList()
         selectedSubCategory = null // Reset subcategory when category changes
+    }
+
+    LaunchedEffect(type) {
+        paymentViewModel.generateNewTag(type) { tag ->
+            generatedTag = tag
+        }
     }
 
     Column(modifier = Modifier
@@ -332,6 +342,10 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
 
         Spacer(modifier = Modifier.height(16.dp))
 
+        Text("Generated Tag: $generatedTag")
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         if (type == "borrow" || type == "lent") {
             OutlinedTextField(
                 value = counterpartyName,
@@ -374,22 +388,25 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
 
         Button(
             onClick = {
-                val userId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
-                val payment = Payment(
-                    id = UUID.randomUUID().toString(),
-                    amount = amount.toDoubleOrNull() ?: 0.0,
-                    notes = notes,
-                    paymentMode = paymentMode,
-                    payeeId = "", // you can associate later
-                    accountId = userId ,     // if you track events
-                    timestamp = chosenTimestamp,
-                    category = selectedCategory?.id ?: "",
-                    subCategory = selectedSubCategory?.id ?: "",
-                    type = type,
-                    counterpartyName = if (type == "borrow" || type == "lent") counterpartyName else ""
-                )
-                viewModel.addPayment(payment) {
-                    navController.popBackStack() // navigate back
+                paymentViewModel.generateNewTag(type) { tag ->
+                    val userId = FirebaseAuth.getInstance().currentUser?.uid.orEmpty()
+                    val payment = Payment(
+                        id = UUID.randomUUID().toString(),
+                        amount = amount.toDoubleOrNull() ?: 0.0,
+                        notes = notes,
+                        paymentMode = paymentMode,
+                        payeeId = "", // you can associate later
+                        accountId = userId ,     // if you track events
+                        timestamp = chosenTimestamp,
+                        category = selectedCategory?.id ?: "",
+                        subCategory = selectedSubCategory?.id ?: "",
+                        type = type,
+                        counterpartyName = if (type == "borrow" || type == "lent") counterpartyName else "",
+                        tag = tag
+                    )
+                    viewModel.addPayment(payment) {
+                        navController.popBackStack() // navigate back
+                    }
                 }
             },
             modifier = Modifier.fillMaxWidth()
@@ -600,6 +617,17 @@ fun PaymentListItem(
                 fontWeight = FontWeight.Medium,
                 modifier = Modifier.padding(top = 4.dp)
             )
+
+            // 🆔 Optional Tag (e.g., #EX01)
+            if (!payment.tag.isNullOrBlank()) {
+                Text(
+                    text = payment.tag,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.padding(top = 2.dp)
+                )
+            }
 
             if (payment.notes.isNotBlank()) {
                 Text(

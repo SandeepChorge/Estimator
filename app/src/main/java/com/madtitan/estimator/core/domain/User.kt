@@ -48,7 +48,7 @@ data class Payment(
     val category: String = "",            // e.g., "Food"
     val subCategory: String = "",         // e.g., "Dinner"
     val counterpartyName: String = "",    // used only for borrow/lent
-    val tag: String = "",                 // Auto-generated tag per grouped transaction  #BR01
+    val tag: String? = null,                 // Auto-generated tag per grouped transaction  #BR01
     val linkedToTag: String? = null,       // For repayments (points to #BR01 or #LN02),
     val isDeleted: Boolean = false
 )
