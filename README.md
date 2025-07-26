@@ -132,3 +132,29 @@ This roadmap is structured for efficient development of an advanced expense/inco
 
 ---
 
+# 🔄 Future-Proofing Firestore Transaction Architecture for Shared Accounts
+
+This document outlines the current architecture of the Firestore data model for single-user transactions, and how to evolve it to support **shared transactions between multiple users** in later phases — without requiring a major refactor.
+
+---
+
+## ✅ Current Architecture (Phase 1)
+
+### 🧩 Collections Used
+- `/payments/{paymentId}`
+- `/tag_counters/{userId}`
+- `/categories/{categoryId}/subcategories/{subCategoryId}`
+- `/reminders/{reminderId}`
+
+### 🧍 Scoped by User
+All documents contain:
+```json
+{
+  "accountId": "{userId}" // currently set as Firebase UID
+}
+
+function isOwner(docOwnerId) {
+  return request.auth.uid == docOwnerId;
+}
+
+
