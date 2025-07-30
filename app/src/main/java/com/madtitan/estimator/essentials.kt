@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -145,7 +146,7 @@ fun AppNavHost(navController: NavHostController, modifier: Modifier = Modifier) 
             arguments = listOf(navArgument("paymentId") { type = NavType.StringType })
         ) { backStackEntry ->
             val paymentId = backStackEntry.arguments?.getString("paymentId") ?: return@composable
-            PaymentDetailScreen(paymentId = paymentId)
+            PaymentDetailScreen(paymentId = paymentId, navController)
         }
 
 
@@ -265,6 +266,12 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
 
     var generatedTag by remember { mutableStateOf("") }
 
+    var availableTags by remember { mutableStateOf<List<String>>(emptyList()) }
+    var selectedLinkedTag by remember { mutableStateOf<String?>(null) }
+    var selectedLinkedToTag by remember { mutableStateOf<String?>(null) }
+
+    val borrowedOrLentTags by paymentViewModel.borrowedOrLentTags.collectAsState(initial = emptyList())
+
     LaunchedEffect(selectedCategory) {
         subcategories = selectedCategory?.let {
             categoryViewModel.categoryList
@@ -274,9 +281,16 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
         selectedSubCategory = null // Reset subcategory when category changes
     }
 
+    // Load borrow/lent tags for dropdown
+
+
     LaunchedEffect(type) {
-        paymentViewModel.generateNewTag(type) { tag ->
+      /*  paymentViewModel.generateNewTag(type) { tag ->
             generatedTag = tag
+        }
+*/
+        if (type == "income" || type == "expense") {
+            paymentViewModel.fetchBorrowedOrLentTags()
         }
     }
 
@@ -356,7 +370,15 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
 
             Spacer(modifier = Modifier.height(16.dp))
         }
+        if (type == "income" || type == "expense") {
+            LinkedTagDropdown(
+                tags = borrowedOrLentTags,
+                selectedTag = selectedLinkedToTag,
+                onTagSelected = { selectedLinkedToTag = it }
+            )
 
+            Spacer(modifier = Modifier.height(16.dp))
+        }
 
         CategoryDropdown(
             categories = categories.map { it.category },
@@ -402,7 +424,8 @@ fun AddExpenseScreen(navController: NavHostController, viewModel: BudgetViewMode
                         subCategory = selectedSubCategory?.id ?: "",
                         type = type,
                         counterpartyName = if (type == "borrow" || type == "lent") counterpartyName else "",
-                        tag = tag
+                        tag = tag,
+                        linkedToTag = if (type == "income" || type == "expense") selectedLinkedToTag else null
                     )
                     viewModel.addPayment(payment) {
                         navController.popBackStack() // navigate back
@@ -534,10 +557,20 @@ fun AllTransactionsScreen(navController: NavController) {
 }
 
 @Composable
-fun PaymentDetailScreen(paymentId: String) {
+fun PaymentDetailScreen(paymentId: String, navController: NavHostController) {
     val viewModel: PaymentViewModel = hiltViewModel()
     val categoryViewModel: CategoryViewModel = hiltViewModel()
     val payment by viewModel.getPaymentById(paymentId).collectAsState(initial = null)
+    val linkedPayments by remember(payment?.tag) {
+        payment?.tag?.let { viewModel.getLinkedPaymentsForTag(it) }
+    }?.collectAsState(initial = emptyList()) ?: remember { mutableStateOf(emptyList()) }
+
+    // Group linked payments by date
+    val grouped = remember(linkedPayments) {
+        linkedPayments
+            .distinctBy { it.id }
+            .groupBy { formatRelativeDate(it.timestamp.toDate()) }
+    }
     /*
     //category name display
     val categoryName = categoryViewModel.categoryList
@@ -566,7 +599,29 @@ fun PaymentDetailScreen(paymentId: String) {
 
             if (it.type == "borrow" || it.type == "lent") {
                 Text("Person: ${it.counterpartyName}")
+
+                it.tag?.let { tag->
+                    Text(
+                        text = "Total Linked Payments: ₹${String.format("%.2f", linkedPayments.sumOf { it.amount })}"
+                    )
+                }
             }
+
+            if (linkedPayments.isNotEmpty()) {
+                Text(
+                    "Linked Transactions",
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(top = 24.dp, bottom = 8.dp)
+                )
+                GroupedPaymentList(
+                    groupedPayments = grouped,
+                    onPaymentClick = { payment ->
+                        navController.navigate(Screen.PaymentDetail.createRoute(payment.id))
+                    }
+                )
+            }
+
+
 
 
         }
@@ -721,53 +776,13 @@ fun AllTransactionsScreen(
                 viewModel.updateDateRange(null, null)
             })
 
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize()
-            ) {
-                grouped.forEach { (dateLabel, itemsForDay) ->
-                    val dayTotal = itemsForDay.sumOf { it.amount }
-
-                    stickyHeader {
-                        Surface(
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            tonalElevation = 2.dp
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = dateLabel,
-                                    style = MaterialTheme.typography.titleSmall
-                                )
-                                Text(
-                                    text = "₹%.2f".format(dayTotal),
-                                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
-                                )
-                            }
-                        }
-                    }
-
-                    items(items = itemsForDay ) { payment ->
-                        PaymentListItem(payment = payment) {
-                            navController.navigate(Screen.PaymentDetail.createRoute(payment.id))
-                        }
-                    }
+            GroupedPaymentList(
+                groupedPayments = grouped,
+                listState = listState,
+                onPaymentClick = { payment ->
+                    navController.navigate(Screen.PaymentDetail.createRoute(payment.id))
                 }
-
-                if (grouped.isEmpty()) {
-                    item {
-                        Text(
-                            "No transactions found.",
-                            modifier = Modifier.padding(16.dp)
-                        )
-                    }
-                }
-            }
+            )
         }
 
     }
@@ -1375,6 +1390,112 @@ fun TypeDropdown(
                         onTypeSelected(type)
                         expanded = false
                     }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun LinkedTagDropdown(
+    tags: List<String>,
+    selectedTag: String?,
+    onTagSelected: (String?) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = selectedTag ?: "None",
+            onValueChange = {},
+            label = { Text("Link to Borrow/Lent") },
+            readOnly = true,
+            trailingIcon = {
+                IconButton(onClick = { expanded = true }) {
+                    Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            DropdownMenuItem(
+                text = { Text("None") },
+                onClick = {
+                    onTagSelected(null)
+                    expanded = false
+                }
+            )
+
+            tags.forEach { tag ->
+                DropdownMenuItem(
+                    text = { Text(tag) },
+                    onClick = {
+                        onTagSelected(tag)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+fun GroupedPaymentList(
+    groupedPayments: Map<String, List<Payment>>,
+    modifier: Modifier = Modifier,
+    listState: LazyListState = rememberLazyListState(),
+    onPaymentClick: (Payment) -> Unit
+) {
+    LazyColumn(
+        state = listState,
+        modifier = modifier.fillMaxSize()
+    ) {
+        groupedPayments.forEach { (dateLabel, itemsForDay) ->
+            val dayTotal = itemsForDay.sumOf { it.amount }
+
+            stickyHeader {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    tonalElevation = 2.dp
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = dateLabel,
+                            style = MaterialTheme.typography.titleSmall
+                        )
+                        Text(
+                            text = "₹%.2f".format(dayTotal),
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
+                }
+            }
+
+            items(items = itemsForDay) { payment ->
+                PaymentListItem(payment = payment) {
+                    onPaymentClick(payment)
+                }
+            }
+        }
+
+        if (groupedPayments.isEmpty()) {
+            item {
+                Text(
+                    "No transactions found.",
+                    modifier = Modifier.padding(16.dp)
                 )
             }
         }

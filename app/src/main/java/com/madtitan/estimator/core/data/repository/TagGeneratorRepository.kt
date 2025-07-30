@@ -18,14 +18,6 @@ class TagGeneratorRepository @Inject constructor(
 
 
     suspend fun generateTagForType(type: String): String {
-        val tagPrefix = when (type.lowercase()) {
-            "expense" -> "EX"
-            "income" -> "IN"
-            "borrow" -> "BR"
-            "lent" -> "LN"
-            else -> throw IllegalArgumentException("Invalid type: $type")
-        }
-
         val tagCounterDocRef = firestore
             .collection("tag_counters")
             .document(userId)
@@ -34,25 +26,29 @@ class TagGeneratorRepository @Inject constructor(
             firestore.runTransaction { transaction ->
                 val snapshot = transaction.get(tagCounterDocRef)
 
-                val currentCount = snapshot.getLong(type) ?: 0L
+                // Initialize doc if it doesn't exist
+                val data = snapshot.data ?: mapOf("global" to 0L)
+                val currentCount = (data["global"] as? Long) ?: 0L
                 val nextCount = currentCount + 1
 
+                // ✅ Write only after all reads
                 transaction.set(
                     tagCounterDocRef,
-                    mapOf(type to nextCount),
+                    mapOf("global" to nextCount),
                     SetOptions.merge()
                 )
 
-                val tag = "#$tagPrefix%02d".format(nextCount)
+                val tag = "#TX%02d".format(nextCount)
                 continuation.resume(tag)
-
             }.addOnFailureListener { e ->
-                // ✅ Only resume if not already resumed
                 if (continuation.context[Job]?.isActive == true) {
                     continuation.resumeWithException(e)
                 }
             }
         }
     }
+
+
+
 
 }
