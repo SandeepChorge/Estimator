@@ -1,6 +1,9 @@
 package com.madtitan.estimator
 
+import android.app.Activity
 import android.app.DatePickerDialog
+import android.content.Intent
+import android.content.pm.PackageManager
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
@@ -82,6 +85,7 @@ import com.madtitan.estimator.core.domain.CategoryWithSubCategories
 import com.madtitan.estimator.core.domain.Payment
 import com.madtitan.estimator.core.domain.SubCategory
 import com.madtitan.estimator.feature_auth.ui.LoginScreen
+import com.madtitan.estimator.feature_auth.utils.requestStoragePermission
 import com.madtitan.estimator.feature_auth.viewmodel.AllTransactionsViewModel
 import com.madtitan.estimator.feature_auth.viewmodel.BudgetViewModel
 import com.madtitan.estimator.feature_auth.viewmodel.CategoryViewModel
@@ -182,7 +186,9 @@ fun DashboardScreen(navController: NavHostController,
                     viewModel: BudgetViewModel = hiltViewModel()) {
     val recentTransactions by viewModel.fetchRecentPayments().collectAsState(initial = emptyList())
     val user = FirebaseAuth.getInstance().currentUser
-
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    val activity = LocalContext.current as? Activity
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -214,6 +220,61 @@ fun DashboardScreen(navController: NavHostController,
             Spacer(Modifier.width(8.dp))
             Text("Manage Categories")
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+
+        Button(
+            onClick = {
+                activity?.let {
+                    requestStoragePermission(it) {
+                        scope.launch {
+                            val uri = viewModel.exportUserDataToJson()
+                            uri?.let {
+                                try {
+                                    val intent = Intent(Intent.ACTION_SEND).apply {
+                                        type = "application/json"
+                                        putExtra(Intent.EXTRA_STREAM, it)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    // ✅ Grant URI permission to all apps that can handle the intent
+                                    val resInfoList = context.packageManager.queryIntentActivities(
+                                        intent,
+                                        PackageManager.MATCH_DEFAULT_ONLY
+                                    )
+                                    for (resolveInfo in resInfoList) {
+                                        val packageName = resolveInfo.activityInfo.packageName
+                                        context.grantUriPermission(
+                                            packageName,
+                                            it,
+                                            Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                        )
+                                    }
+
+                                    context.startActivity(
+                                        Intent.createChooser(
+                                            intent,
+                                            "Export Data As JSON"
+                                        )
+                                    )
+                                } catch (e: Exception) {
+                                    e.printStackTrace()
+                                    // Show error message
+                                }
+                            }
+                        }
+                    }
+                }
+
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Export")
+            Spacer(Modifier.width(8.dp))
+            Text("Export My Data (JSON)")
+        }
+
+
 
         Spacer(modifier = Modifier.height(24.dp))
 
@@ -504,7 +565,9 @@ fun RecentTransactionsSection(
 ) {
     Column {
         Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             Text(
@@ -1007,7 +1070,10 @@ fun CategoryManagementScreen(navController: NavHostController,viewModel: Categor
             }
         }
     ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding).padding(16.dp)) {
+        Column(Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(16.dp)) {
             Text("Manage Categories", style = MaterialTheme.typography.titleLarge)
 
             Spacer(Modifier.height(16.dp))

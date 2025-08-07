@@ -1,10 +1,12 @@
 package com.madtitan.estimator.feature_auth.viewmodel
 
+import android.net.Uri
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.Query
+import com.madtitan.estimator.core.data.repository.ExportRepository
 import com.madtitan.estimator.core.domain.Payment
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.channels.awaitClose
@@ -14,7 +16,8 @@ import javax.inject.Inject
 
 @HiltViewModel
 class BudgetViewModel @Inject constructor(
-    private val firestore: FirebaseFirestore
+    private val firestore: FirebaseFirestore,
+    private val exportRepository: ExportRepository
 ) : ViewModel() {
 
     fun addPayment(payment: Payment, onComplete: () -> Unit) {
@@ -44,5 +47,10 @@ class BudgetViewModel @Inject constructor(
             }
 
         awaitClose { listener.remove() }
+    }
+
+    // ✅ New: Export Trigger (calls repository)
+    suspend fun exportUserDataToJson(): Uri? {
+        return exportRepository.exportUserDataToJson()
     }
 }

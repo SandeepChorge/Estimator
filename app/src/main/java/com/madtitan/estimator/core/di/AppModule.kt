@@ -5,6 +5,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 import com.madtitan.estimator.core.data.FirestoreDataSource
 import com.madtitan.estimator.core.data.repository.EventRepository
+import com.madtitan.estimator.core.data.repository.ExportRepository
 import com.madtitan.estimator.core.data.repository.PaymentRepository
 import com.madtitan.estimator.core.data.repository.RecipientRepository
 import com.madtitan.estimator.core.data.repository.UserRepository
@@ -52,4 +53,11 @@ object AppModule {
     @Singleton
     fun providePaymentRepository(dataSource: FirestoreDataSource): PaymentRepository =
         PaymentRepository(dataSource)
+
+    @Provides
+    @Singleton
+    fun provideExportRepository(dataSource: FirestoreDataSource,
+                                @ApplicationContext context: Context,
+                                auth: FirebaseAuth): ExportRepository =
+        ExportRepository(context,dataSource, auth)
 }

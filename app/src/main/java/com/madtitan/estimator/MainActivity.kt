@@ -1,6 +1,8 @@
 package com.madtitan.estimator
 
+import android.content.pm.PackageManager
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -34,6 +36,20 @@ class MainActivity : ComponentActivity() {
                     AppNavHost(navController = navController, modifier = Modifier.padding(innerPadding))
                 }
             }
+        }
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String?>,
+        grantResults: IntArray,
+        deviceId: Int
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults, deviceId)
+        if (requestCode == 1001 && grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            Toast.makeText(this, "Storage Permission granted", Toast.LENGTH_SHORT).show()
+        } else {
+            Toast.makeText(this, "Please allow storage permission", Toast.LENGTH_SHORT).show()
         }
     }
 }
