@@ -4,8 +4,12 @@ import android.app.Activity
 import android.app.DatePickerDialog
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -13,18 +17,28 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.List
@@ -33,6 +47,7 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -66,9 +81,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavController
@@ -80,24 +97,34 @@ import androidx.navigation.navArgument
 import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.gson.Gson
 import com.madtitan.estimator.core.domain.Category
 import com.madtitan.estimator.core.domain.CategoryWithSubCategories
 import com.madtitan.estimator.core.domain.Payment
 import com.madtitan.estimator.core.domain.SubCategory
 import com.madtitan.estimator.feature_auth.ui.LoginScreen
+import com.madtitan.estimator.feature_auth.utils.ChartType
 import com.madtitan.estimator.feature_auth.utils.requestStoragePermission
 import com.madtitan.estimator.feature_auth.viewmodel.AllTransactionsViewModel
 import com.madtitan.estimator.feature_auth.viewmodel.BudgetViewModel
 import com.madtitan.estimator.feature_auth.viewmodel.CategoryViewModel
 import com.madtitan.estimator.feature_auth.viewmodel.PaymentViewModel
+import com.madtitan.estimator.feature_auth.viewmodel.ReportViewModel
+import com.madtitan.estimator.feature_budget.PercentValue
+import com.madtitan.estimator.feature_budget.ReportStats
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
+import java.time.LocalDate
+import java.time.Month
+import java.time.YearMonth
+import java.time.ZoneId
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import kotlin.math.roundToInt
 
 sealed class Screen(val route: String)  {
     //open val route: String get() = this::class.simpleName!!.lowercase()
@@ -183,16 +210,44 @@ fun SplashRouter(navController: NavHostController) {
 
 @Composable
 fun DashboardScreen(navController: NavHostController,
-                    viewModel: BudgetViewModel = hiltViewModel()) {
+                    viewModel: BudgetViewModel = hiltViewModel(),
+                    reportViewModel: ReportViewModel = hiltViewModel()) {
     val recentTransactions by viewModel.fetchRecentPayments().collectAsState(initial = emptyList())
     val user = FirebaseAuth.getInstance().currentUser
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val activity = LocalContext.current as? Activity
+    val activity = LocalActivity.current
+    val reportStats = reportViewModel.stats
+    var selectedMonth by remember { mutableStateOf(LocalDate.now().monthValue) }
+    var selectedYear by remember { mutableStateOf(LocalDate.now().year) }
+
+    // Load when month/year changes
+    LaunchedEffect(selectedMonth, selectedYear) {
+        val from = Timestamp(
+            Date.from(
+                LocalDate.of(selectedYear, selectedMonth, 1)
+                    .atStartOfDay(ZoneId.systemDefault())
+                    .toInstant()
+            )
+        )
+
+        val to = Timestamp(
+            Date.from(
+                LocalDate.of(selectedYear, selectedMonth, YearMonth.of(selectedYear, selectedMonth).lengthOfMonth())
+                    .atTime(23, 59, 59)
+                    .atZone(ZoneId.systemDefault())
+                    .toInstant()
+            )
+        )
+
+        reportViewModel.loadReport(from, to)
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
             .padding(24.dp)
+            .verticalScroll(rememberScrollState())
     ) {
         Text(
             text = "Welcome, ${user?.displayName ?: "User"} 👋",
@@ -278,6 +333,29 @@ fun DashboardScreen(navController: NavHostController,
 
         Spacer(modifier = Modifier.height(24.dp))
 
+
+        Row {
+            DropdownMenuBox(
+                label = "Month",
+                options = Month.values().map { it.name },
+                selectedIndex = selectedMonth - 1,
+                onSelected = { selectedMonth = it + 1 }
+            )
+            Spacer(Modifier.width(8.dp))
+            DropdownMenuBox(
+                label = "Year",
+                options = (2020..LocalDate.now().year).map { it.toString() },
+                selectedIndex = (2020..LocalDate.now().year).indexOf(selectedYear),
+                onSelected = { selectedYear = 2020 + it }
+            )
+        }
+
+        Spacer(Modifier.height(16.dp))
+        ReportSummary(reportStats)
+
+
+        Spacer(modifier = Modifier.height(24.dp))
+
         RecentTransactionsSection(
             recentTransactions = recentTransactions,
             onPaymentClick = { paymentId ->
@@ -287,6 +365,9 @@ fun DashboardScreen(navController: NavHostController,
                 navController.navigate(Screen.AllTransactions.route)
             }
         )
+
+
+
 
     }
 }
@@ -584,13 +665,13 @@ fun RecentTransactionsSection(
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        LazyColumn {
+      /*  LazyColumn {
             items(recentTransactions) { payment ->
                 PaymentListItem(payment = payment) {
                     onPaymentClick(payment.id)
                 }
             }
-        }
+        }*/
     }
 }
 
@@ -1568,7 +1649,375 @@ fun GroupedPaymentList(
     }
 }
 
+@Composable
+fun DropdownMenuBox(
+    label: String,
+    options: List<String>,
+    selectedIndex: Int,
+    onSelected: (Int) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    Column {
+        Text(label)
+        Box {
+            Text(
+                text = options[selectedIndex],
+                modifier = Modifier
+                    .clickable { expanded = true }
+                    .padding(8.dp)
+                    .border(1.dp, Color.Gray)
+            )
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                options.forEachIndexed { index, option ->
+                    DropdownMenuItem(
+                        text = { Text(option) },
+                        onClick = {
+                            onSelected(index)
+                            expanded = false
+                        }
+                    )
+                }
+            }
+        }
+    }
+}
+
+
+@Composable
+fun ReportSummary(stats: ReportStats?) {
+    stats ?: return
+
+    var selectedChartType by remember { mutableStateOf(ChartType.PIE) }
+
+    Column(modifier = Modifier.padding(16.dp)) {
+        // 🔹 Chart type selector row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            ChartType.values().forEach { type ->
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(4.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (selectedChartType == type)
+                                MaterialTheme.colorScheme.primaryContainer
+                            else
+                                MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        .clickable { selectedChartType = type }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        type.label,
+                        color = if (selectedChartType == type)
+                            MaterialTheme.colorScheme.onPrimaryContainer
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Totals Section
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly
+        ) {
+            SummaryCard("💰 Income", stats.totalIncome, MaterialTheme.colorScheme.primaryContainer, Modifier.weight(1f))
+            SummaryCard("💸 Expense", stats.totalExpense, MaterialTheme.colorScheme.errorContainer, Modifier.weight(1f))
+            SummaryCard("📊 Remaining", stats.totalRemaining, MaterialTheme.colorScheme.secondaryContainer, Modifier.weight(1f))
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Expenses by Category
+        Text("Expenses by Category", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+        ReportSummaryGrid(stats.expenseByCategory)
+
+        Spacer(Modifier.height(8.dp))
+        when (selectedChartType) {
+            ChartType.PIE -> CategoryChartWithLegend(stats.expenseByCategory)
+            ChartType.BAR -> CategoryBarChart(stats.expenseByCategory)
+            ChartType.STACKED -> StackedBarChart(stats.expenseByCategory)
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Expenses by SubCategory
+        Text("Expenses by SubCategory", style = MaterialTheme.typography.titleLarge)
+        Spacer(Modifier.height(8.dp))
+        ReportSummaryGrid(stats.expenseBySubCategory)
+
+        Spacer(Modifier.height(8.dp))
+        stats.expenseBySubCategoryGrouped.forEach { (category, subMap) ->
+            Text(category, style = MaterialTheme.typography.titleLarge)
+            when (selectedChartType) {
+                ChartType.PIE -> CategoryChartWithLegend(subMap)
+                ChartType.BAR -> CategoryBarChart(subMap)
+                ChartType.STACKED -> StackedBarChart(subMap)
+            }
+            Spacer(Modifier.height(8.dp))
+        }
+    }
+}
+
+@Composable
+fun SummaryCard(
+    title: String,
+    amount: Double,
+    backgroundColor: Color,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier.padding(horizontal = 4.dp),
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp),
+        shape = RoundedCornerShape(12.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(text = title, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = "₹${"%.2f".format(amount)}",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+    }
+}
+
+@Composable
+fun ReportSummaryGrid(data: Map<String, PercentValue>) {
+    LazyVerticalGrid(
+        columns = GridCells.Fixed(2),
+        contentPadding = PaddingValues(4.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.heightIn(max = 300.dp) // keeps dashboard compact
+    ) {
+        items (data.entries.toList()) { (label, value) ->
+            ReportCategoryTile(
+                name = label,
+                amount = value.amount,
+                percent = value.percent,
+                color = MaterialTheme.colorScheme.surfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+fun ReportCategoryTile(name: String, amount: Double, percent: Double, color: Color) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = color),
+        shape = RoundedCornerShape(12.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(text = name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+            Text(text = "₹${"%.2f".format(amount)}", style = MaterialTheme.typography.bodyLarge, fontWeight = FontWeight.Bold)
+            Text(text = "${"%.2f".format(percent)}%", style = MaterialTheme.typography.bodySmall)
+        }
+    }
+}
+
+@Composable
+fun CategoryPieChart(data: Map<String, PercentValue>, modifier: Modifier = Modifier) {
+    if (data.isEmpty()) return
+
+    val colors = listOf(
+        Color(0xFFE57373), Color(0xFF64B5F6),
+        Color(0xFF81C784), Color(0xFFFFD54F),
+        Color(0xFFBA68C8), Color(0xFFFF8A65)
+    )
+
+    Canvas(modifier = modifier.size(200.dp)) {
+        val totalAngle = 360f
+        var startAngle = -90f // start from top
+        val categoryList = data.entries.toList()
+
+        categoryList.forEachIndexed { index, entry ->
+            val sweep = (entry.value.percent / 100f) * totalAngle
+            drawArc(
+                color = colors[index % colors.size],
+                startAngle = startAngle,
+                sweepAngle = sweep.toFloat(),
+                useCenter = true
+            )
+            startAngle += sweep.toFloat()
+        }
+    }
+}
+
+@Composable
+fun CategoryChartWithLegend(data: Map<String, PercentValue>) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        CategoryPieChart(data)
+        Spacer(Modifier.height(16.dp))
+        Column {
+            data.entries.forEachIndexed { index, (label, value) ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .size(12.dp)
+                            .background(
+                                color = listOf(
+                                    Color(0xFFE57373), Color(0xFF64B5F6),
+                                    Color(0xFF81C784), Color(0xFFFFD54F),
+                                    Color(0xFFBA68C8), Color(0xFFFF8A65)
+                                )[index % 6],
+                                shape = CircleShape
+                            )
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("$label (${String.format("%.2f", value.percent)}%)")
+                }
+            }
+        }
+    }
+}
 
 
 
+@Composable
+fun CategoryBarChart(data: Map<String, PercentValue>, modifier: Modifier = Modifier) {
+    val maxAmount = (data.values.maxOfOrNull { it.amount } ?: 1.0)
 
+    Column(modifier.padding(8.dp)) {
+        data.forEach { (label, value) ->
+            Column(Modifier.padding(vertical = 4.dp)) {
+                Text(text = "$label (${value.percent}%)", style = MaterialTheme.typography.bodyMedium)
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(24.dp)
+                        .background(Color.Gray.copy(alpha = 0.2f))
+                ) {
+                    Box(
+                        Modifier
+                            .fillMaxHeight()
+                            .fillMaxWidth((value.amount / maxAmount).toFloat())
+                            .background(Color(0xFF4CAF50)) // Green
+                    )
+                }
+                Text(
+                    text = "₹${value.amount}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun CategoryVerticalBarChart(data: Map<String, PercentValue>, modifier: Modifier = Modifier) {
+    val maxAmount = (data.values.maxOfOrNull { it.amount } ?: 1.0)
+
+    Row(
+        modifier = modifier
+            .padding(8.dp)
+            .fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceEvenly
+    ) {
+        data.forEach { (label, value) ->
+            Column(
+                verticalArrangement = Arrangement.Bottom,
+                horizontalAlignment = Alignment.CenterHorizontally,
+                modifier = Modifier.height(200.dp)
+            ) {
+                Box(
+                    Modifier
+                        .width(24.dp)
+                        .fillMaxHeight((value.amount / maxAmount).toFloat())
+                        .background(Color(0xFF2196F3)) // Blue
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StackedBarChart(
+    data: Map<String, PercentValue>, // label -> PercentValue
+    modifier: Modifier = Modifier,
+    barHeight: Dp = 24.dp
+) {
+    val colors = remember {
+        listOf(
+            Color(0xFFE57373), // Red
+            Color(0xFF64B5F6), // Blue
+            Color(0xFF81C784), // Green
+            Color(0xFFFFB74D), // Orange
+            Color(0xFFBA68C8), // Purple
+            Color(0xFFFF8A65), // Deep Orange
+            Color(0xFF4DB6AC), // Teal
+            Color(0xFFA1887F)  // Brown
+        )
+    }
+
+    val totalPercent = data.values.sumOf { it.percent }
+
+    Column(modifier = modifier) {
+        // The stacked bar itself
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(barHeight)
+                .clip(RoundedCornerShape(8.dp))
+        ) {
+            var colorIndex = 0
+            data.forEach { (_, value) ->
+                val weight = (value.percent / totalPercent).toFloat()
+                Box(
+                    modifier = Modifier
+                        .weight(weight)
+                        .fillMaxHeight()
+                        .background(colors[colorIndex % colors.size])
+                )
+                colorIndex++
+            }
+        }
+
+        Spacer(Modifier.height(8.dp))
+
+        // Legend
+        Column {
+            var colorIndex = 0
+            data.forEach { (label, value) ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(12.dp)
+                            .background(colors[colorIndex % colors.size])
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text("$label (${String.format("%.2f", value.percent)}%)")
+                }
+                colorIndex++
+            }
+        }
+    }
+}

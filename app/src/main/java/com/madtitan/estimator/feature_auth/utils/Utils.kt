@@ -15,3 +15,9 @@ fun requestStoragePermission(activity: Activity, onGranted: () -> Unit) {
         ActivityCompat.requestPermissions(activity, arrayOf(permission), 1001)
     }
 }
+
+enum class ChartType(val label: String) {
+    PIE("Pie"),
+    BAR("Bar"),
+    STACKED("Stacked")
+}

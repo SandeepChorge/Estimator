@@ -16,7 +16,7 @@ credentials = "1.5.0"
 credentials-play-services-auth = "1.5.0"
 googleid = "1.1.1"
 firebase-auth-ktx = "22.3.1"  # Update to the latest version if needed
-play-services-auth = "20.8.0"
+play-services-auth = "21.4.0"
 compose-compiler = "1.5.11"
 hilt = "2.50"
 hilt-navigation-compose = "1.1.0"
@@ -61,6 +61,7 @@ androidx-navigation-compose = { module = "androidx.navigation:navigation-compose
 compose-material-dialogs-datetime = { module = "io.github.vanpra.compose-material-dialogs:datetime", version = "0.9.0" }
 androidx-compose-material3 = { group = "androidx.compose.material3", name = "material3" }
 androidx-compose-material3-icons-extended = { group = "androidx.compose.material3", name = "material3-icons-extended" }
+gson = { module = "com.google.code.gson:gson", version = "2.11.0" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

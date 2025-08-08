@@ -9,6 +9,8 @@ import com.madtitan.estimator.core.data.repository.ExportRepository
 import com.madtitan.estimator.core.data.repository.PaymentRepository
 import com.madtitan.estimator.core.data.repository.RecipientRepository
 import com.madtitan.estimator.core.data.repository.UserRepository
+import com.madtitan.estimator.feature_auth.ReportRepositoryImpl
+import com.madtitan.estimator.feature_budget.ReportRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -60,4 +62,12 @@ object AppModule {
                                 @ApplicationContext context: Context,
                                 auth: FirebaseAuth): ExportRepository =
         ExportRepository(context,dataSource, auth)
+
+
+    @Provides
+    @Singleton
+    fun provideReportRepository(dataSource: FirestoreDataSource,
+                                auth: FirebaseAuth,
+                                db: FirebaseFirestore): ReportRepository =
+        ReportRepositoryImpl(dataSource, auth, db)
 }

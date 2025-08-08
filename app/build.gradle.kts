@@ -109,6 +109,7 @@ dependencies {
     implementation(libs.androidx.material3)
     implementation(libs.firebase.firestore)
     implementation(libs.googleid)
+    implementation(libs.gson)
    /* implementation(libs.androidx.compose.material3)              // material3
     implementation(libs.androidx.compose.material3.icons.extended)  // material3-icons-extended*/
     //implementation(libs.compose.material.dialogs.datetime)
